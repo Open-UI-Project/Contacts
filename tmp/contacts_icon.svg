@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Smooth linear gradient for container -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF5A4E"/>
+      <stop offset="100%" stop-color="#E53935"/>
+    </linearGradient>
+    <!-- Inner dish radial/linear depth -->
+    <linearGradient id="dishGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#C62828"/>
+      <stop offset="100%" stop-color="#B71C1C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle container -->
+  <rect x="16" y="16" width="480" height="480" rx="140" ry="140" fill="url(#bgGrad)"/>
+
+  <!-- Inner dark circular depression / dish -->
+  <circle cx="256" cy="256" r="176" fill="url(#dishGrad)"/>
+
+  <!-- White Avatar Head -->
+  <circle cx="256" cy="208" r="48" fill="#FFFFFF"/>
+
+  <!-- White Avatar Body / Shoulders -->
+  <path d="M 148 356 C 148 296, 196 280, 256 280 C 316 280, 364 296, 364 356 C 364 366, 356 374, 344 374 L 168 374 C 156 374, 148 366, 148 356 Z" fill="#FFFFFF"/>
+</svg>

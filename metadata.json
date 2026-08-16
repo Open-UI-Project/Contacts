@@ -1,0 +1,5 @@
+{
+  "name": "Contacts",
+  "description": "Lightweight, open-source Android Contacts app built with Jetpack Compose and Material 3.",
+  "requestFramePermissions": [],
+}
