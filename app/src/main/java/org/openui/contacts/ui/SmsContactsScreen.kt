@@ -15,8 +15,10 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -38,7 +40,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Add
@@ -51,6 +56,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SimCard
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Storage
@@ -59,6 +65,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -116,8 +123,16 @@ fun SmsContactsScreen(
     onRequestPermissions: () -> Unit,
     onRefresh: () -> Unit,
     onFetchCallLogs: suspend (String) -> List<CallLogItem>,
-    onAddContact: suspend (name: String, number: String, storageTarget: String) -> Boolean = { _, _, _ -> false },
+    onAddContact: suspend (name: String, number: String, extraNumbers: List<String>, storageTarget: String) -> Boolean = { _, _, _, _ -> false },
+    onThemeModeChanged: (org.openui.contacts.data.AppThemeMode) -> Unit = {},
     onDetailStateChanged: (Boolean) -> Unit = {},
+    initialAddName: String? = null,
+    initialAddNumber: String? = null,
+    autoOpenAddDialog: Boolean = false,
+    initialViewContact: ContactItem? = null,
+    isPickerMode: Boolean = false,
+    onPickContact: ((ContactItem) -> Unit)? = null,
+    onCancelPicker: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -134,6 +149,8 @@ fun SmsContactsScreen(
     var showFavoritesOnly by remember { mutableStateOf(false) }
     var showStorageDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var currentThemeMode by remember { mutableStateOf(prefs.getThemeMode()) }
     var trashVersion by remember { mutableStateOf(0) }
 
     var currentStorageTarget by remember { mutableStateOf(prefs.getStorageTarget()) }
@@ -142,8 +159,23 @@ fun SmsContactsScreen(
     var showAddContactDialog by remember { mutableStateOf(false) }
     var newContactName by remember { mutableStateOf("") }
     var newContactNumber by remember { mutableStateOf("") }
+    var newContactExtraNumbers by remember { mutableStateOf(listOf<String>()) }
 
     var pendingCallNumber by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(autoOpenAddDialog, initialAddName, initialAddNumber) {
+        if (autoOpenAddDialog) {
+            newContactName = initialAddName ?: ""
+            newContactNumber = initialAddNumber ?: ""
+            showAddContactDialog = true
+        }
+    }
+
+    LaunchedEffect(initialViewContact) {
+        if (initialViewContact != null) {
+            selectedInfoContact = initialViewContact
+        }
+    }
 
     LaunchedEffect(Unit) {
         simAccounts = ContactManager.getAvailableSimAccounts(context)
@@ -285,345 +317,640 @@ fun SmsContactsScreen(
                 }
             )
         } else {
-            Column(
+            val isM3Mode = currentThemeMode == org.openui.contacts.data.AppThemeMode.MATERIAL_3_EXPRESSIVE
+
+            Box(
                 modifier = modifier
                     .fillMaxSize()
                     .background(colors.background)
-                    .statusBarsPadding()
-                    .padding(horizontal = 18.dp)
             ) {
-
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Text(
-                        text = if (showFavoritesOnly) stringResource(R.string.contacts_favorites_title) else stringResource(R.string.contacts_title),
-                        color = colors.textPrimary,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    IconButton(
-                        onClick = {
-                            simAccounts = ContactManager.getAvailableSimAccounts(context)
-                            showStorageDialog = true
-                        }
-                    ) {
-                        Icon(
-                            imageVector = if (currentStorageTarget.startsWith("SIM")) Icons.Rounded.SimCard else Icons.Rounded.Storage,
-                            contentDescription = stringResource(R.string.contacts_storage_location),
-                            tint = if (currentStorageTarget.startsWith("SIM")) colors.dialerGreen else colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            newContactName = ""
-                            newContactNumber = ""
-                            showAddContactDialog = true
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = stringResource(R.string.contacts_add_contact),
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-
-                    IconButton(onClick = { isSearchVisible = !isSearchVisible }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = stringResource(R.string.contacts_search),
-                            tint = colors.textPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    Box {
-                        IconButton(onClick = { isMenuExpanded = true }) {
-                            Icon(
-                                imageVector = Icons.Rounded.MoreVert,
-                                contentDescription = stringResource(R.string.contacts_menu),
-                                tint = colors.textPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = isMenuExpanded,
-                            onDismissRequest = { isMenuExpanded = false },
-                            modifier = Modifier.background(colors.surface)
+                    if (isM3Mode) {
+                        // Google Contacts Material 3 Expressive Top Search Bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp, bottom = 12.dp)
+                                .height(52.dp)
+                                .clip(CircleShape)
+                                .background(colors.cardElevated)
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.contacts_refresh), color = colors.textPrimary, fontSize = 14.sp) },
-                                onClick = {
-                                    isMenuExpanded = false
-                                    onRefresh()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.contacts_storage_location), color = colors.textPrimary, fontSize = 14.sp) },
-                                onClick = {
-                                    isMenuExpanded = false
-                                    simAccounts = ContactManager.getAvailableSimAccounts(context)
-                                    showStorageDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.contacts_trash), color = colors.textPrimary, fontSize = 14.sp) },
-                                onClick = {
-                                    isMenuExpanded = false
-                                    showTrashDialog = true
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.contacts_about), color = colors.textPrimary, fontSize = 14.sp) },
-                                onClick = {
-                                    isMenuExpanded = false
-                                    showAboutDialog = true
-                                }
-                            )
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = isSearchVisible || searchQuery.isNotEmpty(),
-                    enter = fadeIn(animationSpec = tween(200)),
-                    exit = fadeOut(animationSpec = tween(200))
-                ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text(stringResource(R.string.contacts_search_placeholder), color = colors.textMuted, fontSize = 14.sp) },
-                        leadingIcon = {
                             Icon(
                                 imageVector = Icons.Rounded.Search,
                                 contentDescription = stringResource(R.string.contacts_search),
-                                tint = colors.textMuted
+                                tint = colors.primaryBrand,
+                                modifier = Modifier.size(22.dp)
                             )
-                        },
-                        trailingIcon = {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = colors.textPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Normal
+                                ),
+                                cursorBrush = SolidColor(colors.primaryBrand),
+                                modifier = Modifier.weight(1f),
+                                decorationBox = { innerTextField ->
+                                    if (searchQuery.isEmpty()) {
+                                        Text(
+                                            text = stringResource(R.string.contacts_search_placeholder),
+                                            color = colors.textMuted,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            )
                             if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(imageVector = Icons.Rounded.Close, contentDescription = stringResource(R.string.contacts_clear), tint = colors.textMuted)
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.contacts_clear),
+                                        tint = colors.textMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
-                        },
-                        singleLine = true,
-                        shape = SearchFieldShape,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = colors.primaryBrand,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = colors.card,
-                            unfocusedContainerColor = colors.card,
-                            focusedTextColor = colors.textPrimary,
-                            unfocusedTextColor = colors.textPrimary
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    )
-                }
-
-                when {
-                    !hasContactsPermission -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.cardElevated),
-                                contentAlignment = Alignment.Center
+                            IconButton(
+                                onClick = {
+                                    simAccounts = ContactManager.getAvailableSimAccounts(context)
+                                    showStorageDialog = true
+                                },
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Lock,
-                                    contentDescription = null,
-                                    tint = colors.dialerGreen,
-                                    modifier = Modifier.size(34.dp)
+                                    imageVector = if (currentStorageTarget.startsWith("SIM")) Icons.Rounded.SimCard else Icons.Rounded.Storage,
+                                    contentDescription = stringResource(R.string.contacts_storage_location),
+                                    tint = if (currentStorageTarget.startsWith("SIM")) colors.dialerGreen else colors.textSecondary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = stringResource(R.string.contacts_need_access),
-                                color = colors.textPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.contacts_need_access_desc),
-                                color = colors.textSecondary,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(20.dp))
-                            Button(
-                                onClick = onRequestPermissions,
-                                shape = RoundedCornerShape(24.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.dialerGreen)
-                            ) {
-                                Text(
-                                    text = stringResource(R.string.contacts_grant_access),
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                    filteredSortedContacts.isEmpty() -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Contacts,
-                                contentDescription = null,
-                                tint = colors.textMuted,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = if (showFavoritesOnly) stringResource(R.string.contacts_no_favorites) else if (searchQuery.isBlank()) stringResource(R.string.contacts_no_contacts) else stringResource(R.string.contacts_nothing_found),
-                                color = colors.textPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    if (showFavoritesOnly) showFavoritesOnly = false else onRefresh()
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.cardElevated)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Rounded.Refresh, contentDescription = null, tint = colors.textPrimary, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = if (showFavoritesOnly) stringResource(R.string.contacts_show_all) else stringResource(R.string.contacts_refresh), color = colors.textPrimary, fontSize = 13.sp)
+                            Box {
+                                IconButton(
+                                    onClick = { isMenuExpanded = true },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MoreVert,
+                                        contentDescription = stringResource(R.string.contacts_menu),
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = isMenuExpanded,
+                                    onDismissRequest = { isMenuExpanded = false },
+                                    modifier = Modifier.background(colors.surface)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.contacts_refresh), color = colors.textPrimary, fontSize = 14.sp) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            onRefresh()
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.contacts_storage_location), color = colors.textPrimary, fontSize = 14.sp) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            simAccounts = ContactManager.getAvailableSimAccounts(context)
+                                            showStorageDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.contacts_trash), color = colors.textPrimary, fontSize = 14.sp) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            showTrashDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.contacts_settings), color = colors.textPrimary, fontSize = 14.sp) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            showSettingsDialog = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.contacts_about), color = colors.textPrimary, fontSize = 14.sp) },
+                                        onClick = {
+                                            isMenuExpanded = false
+                                            showAboutDialog = true
+                                        }
+                                    )
                                 }
                             }
                         }
-                    }
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                    } else {
+                        // OpenUI One UI Header
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp, bottom = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (searchQuery.isBlank() && !showFavoritesOnly) {
-                                item(key = "favorites_entry_button") {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(ContactRowShape)
-                                            .background(colors.card)
-                                            .clickable { showFavoritesOnly = true }
-                                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                            if (isPickerMode) {
+                                Text(
+                                    text = stringResource(R.string.contacts_pick_contact),
+                                    color = colors.textPrimary,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                IconButton(onClick = { onCancelPicker?.invoke() }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.contacts_cancel),
+                                        tint = colors.textPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = if (showFavoritesOnly) stringResource(R.string.contacts_favorites_title) else stringResource(R.string.contacts_title),
+                                    color = colors.textPrimary,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                IconButton(
+                                    onClick = {
+                                        simAccounts = ContactManager.getAvailableSimAccounts(context)
+                                        showStorageDialog = true
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (currentStorageTarget.startsWith("SIM")) Icons.Rounded.SimCard else Icons.Rounded.Storage,
+                                        contentDescription = stringResource(R.string.contacts_storage_location),
+                                        tint = if (currentStorageTarget.startsWith("SIM")) colors.dialerGreen else colors.textPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        newContactName = ""
+                                        newContactNumber = ""
+                                        newContactExtraNumbers = emptyList()
+                                        showAddContactDialog = true
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Add,
+                                        contentDescription = stringResource(R.string.contacts_add_contact),
+                                        tint = colors.textPrimary,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+
+                                IconButton(onClick = { isSearchVisible = !isSearchVisible }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = stringResource(R.string.contacts_search),
+                                        tint = colors.textPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                Box {
+                                    IconButton(onClick = { isMenuExpanded = true }) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.MoreVert,
+                                            contentDescription = stringResource(R.string.contacts_menu),
+                                            tint = colors.textPrimary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = isMenuExpanded,
+                                        onDismissRequest = { isMenuExpanded = false },
+                                        modifier = Modifier.background(colors.surface)
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(CircleShape)
-                                                .background(StarBadgeColor),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Star,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(14.dp))
-                                        Text(
-                                            text = stringResource(R.string.contacts_favorite),
-                                            color = colors.textPrimary,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Medium
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.contacts_refresh), color = colors.textPrimary, fontSize = 14.sp) },
+                                            onClick = {
+                                                isMenuExpanded = false
+                                                onRefresh()
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.contacts_storage_location), color = colors.textPrimary, fontSize = 14.sp) },
+                                            onClick = {
+                                                isMenuExpanded = false
+                                                simAccounts = ContactManager.getAvailableSimAccounts(context)
+                                                showStorageDialog = true
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.contacts_trash), color = colors.textPrimary, fontSize = 14.sp) },
+                                            onClick = {
+                                                isMenuExpanded = false
+                                                showTrashDialog = true
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.contacts_settings), color = colors.textPrimary, fontSize = 14.sp) },
+                                            onClick = {
+                                                isMenuExpanded = false
+                                                showSettingsDialog = true
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.contacts_about), color = colors.textPrimary, fontSize = 14.sp) },
+                                            onClick = {
+                                                isMenuExpanded = false
+                                                showAboutDialog = true
+                                            }
                                         )
                                     }
                                 }
                             }
+                        }
 
-                            groupedContacts.forEach { (letter, contactsInGroup) ->
-                                item(key = "letter_header_$letter") {
-                                    Text(
-                                        text = letter,
-                                        color = colors.textMuted,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp)
+                        // OpenUI Smooth Pill Search Field
+                        AnimatedVisibility(
+                            visible = isSearchVisible || searchQuery.isNotEmpty(),
+                            enter = expandVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) + fadeIn(animationSpec = tween(200)),
+                            exit = shrinkVertically(
+                                animationSpec = tween(180)
+                            ) + fadeOut(animationSpec = tween(150))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
+                                    .height(46.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.cardElevated)
+                                    .padding(horizontal = 14.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = stringResource(R.string.contacts_search),
+                                        tint = colors.textMuted,
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                }
-                                item(key = "group_$letter") {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(ContactRowShape)
-                                            .background(colors.card)
-                                            .animateContentSize(
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            )
-                                    ) {
-                                        contactsInGroup.forEachIndexed { index, contact ->
-                                            val isExpanded = expandedContactId == contact.id
-                                            ContactRowItem(
-                                                contact = contact,
-                                                isExpanded = isExpanded,
-                                                onRowClick = {
-                                                    expandedContactId = if (isExpanded) null else contact.id
-                                                },
-                                                onCallClick = {
-                                                    initiateCall(contact.number)
-                                                },
-                                                onSmsClick = {
-                                                    onContactClick(contact.number, contact.name, contact.photoUri)
-                                                },
-                                                onInfoClick = {
-                                                    selectedInfoContact = contact
-                                                }
-                                            )
-                                            if (index < contactsInGroup.size - 1) {
-                                                HorizontalDivider(
-                                                    color = colors.divider,
-                                                    thickness = 0.5.dp,
-                                                    modifier = Modifier.padding(start = 68.dp)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    BasicTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(
+                                            color = colors.textPrimary,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Normal
+                                        ),
+                                        cursorBrush = SolidColor(colors.primaryBrand),
+                                        modifier = Modifier.weight(1f),
+                                        decorationBox = { innerTextField ->
+                                            if (searchQuery.isEmpty()) {
+                                                Text(
+                                                    text = stringResource(R.string.contacts_search_placeholder),
+                                                    color = colors.textMuted,
+                                                    fontSize = 14.sp
                                                 )
                                             }
+                                            innerTextField()
+                                        }
+                                    )
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { searchQuery = "" },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = stringResource(R.string.contacts_clear),
+                                                tint = colors.textMuted,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                         }
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            item(key = "footer_list_spacer") {
-                                Spacer(modifier = Modifier.height(100.dp))
+                    when {
+                        !hasContactsPermission -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.cardElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Lock,
+                                        contentDescription = null,
+                                        tint = colors.dialerGreen,
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = stringResource(R.string.contacts_need_access),
+                                    color = colors.textPrimary,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = stringResource(R.string.contacts_need_access_desc),
+                                    color = colors.textSecondary,
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Button(
+                                    onClick = onRequestPermissions,
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.dialerGreen)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.contacts_grant_access),
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                        filteredSortedContacts.isEmpty() -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Contacts,
+                                    contentDescription = null,
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = if (showFavoritesOnly) stringResource(R.string.contacts_no_favorites) else if (searchQuery.isBlank()) stringResource(R.string.contacts_no_contacts) else stringResource(R.string.contacts_nothing_found),
+                                    color = colors.textPrimary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        if (showFavoritesOnly) showFavoritesOnly = false else onRefresh()
+                                    },
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.cardElevated)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(imageVector = Icons.Rounded.Refresh, contentDescription = null, tint = colors.textPrimary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(text = if (showFavoritesOnly) stringResource(R.string.contacts_show_all) else stringResource(R.string.contacts_refresh), color = colors.textPrimary, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(if (isM3Mode) 2.dp else 6.dp)
+                            ) {
+                                if (searchQuery.isBlank() && !showFavoritesOnly) {
+                                    item(key = "favorites_entry_button") {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(if (isM3Mode) RoundedCornerShape(16.dp) else ContactRowShape)
+                                                .background(if (isM3Mode) colors.cardElevated else colors.card)
+                                                .clickable { showFavoritesOnly = true }
+                                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(38.dp)
+                                                    .clip(CircleShape)
+                                                    .background(StarBadgeColor),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Star,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(14.dp))
+                                            Text(
+                                                text = stringResource(R.string.contacts_favorite),
+                                                color = colors.textPrimary,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                groupedContacts.forEach { (letter, contactsInGroup) ->
+                                    item(key = "letter_header_$letter") {
+                                        Text(
+                                            text = letter,
+                                            color = if (isM3Mode) colors.primaryBrand else colors.textMuted,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(start = if (isM3Mode) 16.dp else 8.dp, top = 14.dp, bottom = 4.dp)
+                                        )
+                                    }
+                                    item(key = "group_$letter") {
+                                        if (isM3Mode) {
+                                            // Material 3 Expressive: Clean Flat Group
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .animateContentSize(
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                            ) {
+                                                contactsInGroup.forEachIndexed { index, contact ->
+                                                    val isExpanded = expandedContactId == contact.id
+                                                    ContactRowItem(
+                                                        contact = contact,
+                                                        isExpanded = isExpanded,
+                                                        onRowClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                expandedContactId = if (isExpanded) null else contact.id
+                                                            }
+                                                        },
+                                                        onCallClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                initiateCall(contact.number)
+                                                            }
+                                                        },
+                                                        onSmsClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                onContactClick(contact.number, contact.name, contact.photoUri)
+                                                            }
+                                                        },
+                                                        onInfoClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                selectedInfoContact = contact
+                                                            }
+                                                        }
+                                                    )
+                                                    if (index < contactsInGroup.size - 1) {
+                                                        HorizontalDivider(
+                                                            color = colors.divider.copy(alpha = 0.5f),
+                                                            thickness = 0.5.dp,
+                                                            modifier = Modifier.padding(start = 74.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // OpenUI: Floating Island One UI Group
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(ContactRowShape)
+                                                    .background(colors.card)
+                                                    .animateContentSize(
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                            ) {
+                                                contactsInGroup.forEachIndexed { index, contact ->
+                                                    val isExpanded = expandedContactId == contact.id
+                                                    ContactRowItem(
+                                                        contact = contact,
+                                                        isExpanded = isExpanded,
+                                                        onRowClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                expandedContactId = if (isExpanded) null else contact.id
+                                                            }
+                                                        },
+                                                        onCallClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                initiateCall(contact.number)
+                                                            }
+                                                        },
+                                                        onSmsClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                onContactClick(contact.number, contact.name, contact.photoUri)
+                                                            }
+                                                        },
+                                                        onInfoClick = {
+                                                            if (isPickerMode) {
+                                                                onPickContact?.invoke(contact)
+                                                            } else {
+                                                                selectedInfoContact = contact
+                                                            }
+                                                        }
+                                                    )
+                                                    if (index < contactsInGroup.size - 1) {
+                                                        HorizontalDivider(
+                                                            color = colors.divider,
+                                                            thickness = 0.5.dp,
+                                                            modifier = Modifier.padding(start = 68.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                item(key = "footer_list_spacer") {
+                                    Spacer(modifier = Modifier.height(100.dp))
+                                }
                             }
                         }
                     }
                 }
+
+                // Material 3 Expressive: Google Contacts Bottom FAB
+                if (isM3Mode && !isPickerMode) {
+                    FloatingActionButton(
+                        onClick = {
+                            newContactName = ""
+                            newContactNumber = ""
+                            newContactExtraNumbers = emptyList()
+                            showAddContactDialog = true
+                        },
+                        containerColor = colors.primaryBrand,
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 20.dp, bottom = 28.dp)
+                            .testTag("add_contact_fab")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = stringResource(R.string.contacts_add_contact),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            }
 
                 if (showAddContactDialog) {
                     AlertDialog(
@@ -678,6 +1005,60 @@ fun SmsContactsScreen(
                                     ),
                                     modifier = Modifier.fillMaxWidth()
                                 )
+
+                                newContactExtraNumbers.forEachIndexed { index, extraNum ->
+                                    OutlinedTextField(
+                                        value = extraNum,
+                                        onValueChange = { updatedText ->
+                                            val list = newContactExtraNumbers.toMutableList()
+                                            list[index] = updatedText
+                                            newContactExtraNumbers = list
+                                        },
+                                        label = { Text(stringResource(R.string.contacts_extra_phone_label, index + 1), color = colors.textMuted) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        trailingIcon = {
+                                            IconButton(onClick = {
+                                                val list = newContactExtraNumbers.toMutableList()
+                                                list.removeAt(index)
+                                                newContactExtraNumbers = list
+                                            }) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Close,
+                                                    contentDescription = stringResource(R.string.contacts_remove_number),
+                                                    tint = colors.actionRed,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        },
+                                        singleLine = true,
+                                        shape = DialogFieldShape,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = colors.primaryBrand,
+                                            unfocusedBorderColor = colors.divider,
+                                            focusedTextColor = colors.textPrimary,
+                                            unfocusedTextColor = colors.textPrimary
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                TextButton(
+                                    onClick = { newContactExtraNumbers = newContactExtraNumbers + "" }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Add,
+                                        contentDescription = null,
+                                        tint = colors.primaryBrand,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = stringResource(R.string.contacts_add_another_number),
+                                        color = colors.primaryBrand,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         },
                         confirmButton = {
@@ -685,8 +1066,9 @@ fun SmsContactsScreen(
                                 onClick = {
                                     if (newContactName.isNotBlank() && newContactNumber.isNotBlank()) {
                                         showAddContactDialog = false
+                                        val validExtras = newContactExtraNumbers.map { it.trim() }.filter { it.isNotBlank() }
                                         coroutineScope.launch {
-                                            onAddContact(newContactName.trim(), newContactNumber.trim(), currentStorageTarget)
+                                            onAddContact(newContactName.trim(), newContactNumber.trim(), validExtras, currentStorageTarget)
                                             onRefresh()
                                         }
                                     }
@@ -702,6 +1084,28 @@ fun SmsContactsScreen(
                                 Text(stringResource(R.string.contacts_cancel), color = colors.textMuted)
                             }
                         }
+                    )
+                }
+
+                if (showSettingsDialog) {
+                    SettingsDialog(
+                        currentThemeMode = currentThemeMode,
+                        currentStorageTarget = currentStorageTarget,
+                        onThemeModeChanged = { mode ->
+                            currentThemeMode = mode
+                            prefs.setThemeMode(mode)
+                            onThemeModeChanged(mode)
+                        },
+                        onStorageTargetClick = {
+                            showSettingsDialog = false
+                            simAccounts = ContactManager.getAvailableSimAccounts(context)
+                            showStorageDialog = true
+                        },
+                        onAboutClick = {
+                            showSettingsDialog = false
+                            showAboutDialog = true
+                        },
+                        onDismiss = { showSettingsDialog = false }
                     )
                 }
 
@@ -950,7 +1354,6 @@ fun SmsContactsScreen(
             }
         }
     }
-}
 
 @Composable
 private fun ContactRowItem(
@@ -977,115 +1380,107 @@ private fun ContactRowItem(
             .padding(horizontal = 18.dp, vertical = 14.dp)
             .testTag("contact_item_${contact.id}")
     ) {
-        if (!isExpanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(ContactCircleShape)
+                    .background(avatarColor),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(ContactCircleShape)
-                        .background(avatarColor),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (contact.photoUri != null) {
-                        AsyncImage(
-                            model = contact.photoUri,
-                            contentDescription = contact.name,
-                            modifier = Modifier.size(40.dp),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text(
-                            text = initial,
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                if (contact.photoUri != null) {
+                    AsyncImage(
+                        model = contact.photoUri,
+                        contentDescription = contact.name,
+                        modifier = Modifier.size(42.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = initial,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = contact.name,
                         color = colors.textPrimary,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
-                    if (contact.email != null) {
-                        Text(
-                            text = contact.email,
-                            color = colors.textSecondary,
-                            fontSize = 12.sp
+                    val isSimContact = contact.accountType.contains("sim", ignoreCase = true) || contact.accountType.startsWith("SIM")
+                    if (isSimContact) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.SimCard,
+                            contentDescription = "SIM",
+                            tint = colors.dialerGreen,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = contact.number,
+                    color = colors.textSecondary,
+                    fontSize = 13.sp
+                )
             }
-        } else {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+        }
+
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(animationSpec = tween(200)),
+            exit = shrinkVertically(
+                animationSpec = tween(180)
+            ) + fadeOut(animationSpec = tween(120))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 4.dp)
+            ) {
+                if (contact.additionalNumbers.isNotEmpty()) {
+                    contact.additionalNumbers.forEach { extraNum ->
                         Text(
-                            text = contact.name,
-                            color = colors.textPrimary,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold
+                            text = extraNum,
+                            color = colors.textMuted,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 56.dp, bottom = 4.dp)
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = stringResource(R.string.contacts_mobile_prefix, contact.number),
-                            color = colors.textSecondary,
-                            fontSize = 13.sp
-                        )
-                        if (contact.email != null) {
-                            Text(
-                                text = contact.email,
-                                color = colors.primaryBrand,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(ContactCircleShape)
-                            .background(avatarColor),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (contact.photoUri != null) {
-                            AsyncImage(
-                                model = contact.photoUri,
-                                contentDescription = contact.name,
-                                modifier = Modifier.size(44.dp),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text(
-                                text = initial,
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(18.dp))
+                if (contact.email != null) {
+                    Text(
+                        text = contact.email,
+                        color = colors.primaryBrand,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 56.dp, bottom = 6.dp)
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = 24.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(46.dp)
                             .clip(ContactCircleShape)
                             .background(colors.cardElevated)
                             .clickable(onClick = onCallClick),
@@ -1101,7 +1496,7 @@ private fun ContactRowItem(
 
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(46.dp)
                             .clip(ContactCircleShape)
                             .background(colors.cardElevated)
                             .clickable(onClick = onSmsClick),
@@ -1117,7 +1512,7 @@ private fun ContactRowItem(
 
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(46.dp)
                             .clip(ContactCircleShape)
                             .background(colors.cardElevated)
                             .clickable(onClick = onInfoClick),

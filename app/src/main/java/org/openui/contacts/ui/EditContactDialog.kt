@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddAPhoto
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Email
@@ -69,11 +70,12 @@ fun EditContactDialog(
     currentSocialLink: String,
     currentBackgroundUri: String? = null,
     onDismiss: () -> Unit,
-    onSave: (newName: String, newPhone: String, newEmail: String?, newPhotoUri: Uri?, newSocialLink: String, newBackgroundUri: String?) -> Unit
+    onSave: (newName: String, newPhone: String, extraPhones: List<String>, newEmail: String?, newPhotoUri: Uri?, newSocialLink: String, newBackgroundUri: String?) -> Unit
 ) {
     val colors = AppTheme.colors
     var name by remember(contact) { mutableStateOf(contact.name) }
     var phone by remember(contact) { mutableStateOf(contact.number) }
+    var extraPhones by remember(contact) { mutableStateOf(contact.additionalNumbers) }
     var email by remember(contact) { mutableStateOf(contact.email ?: "") }
     var socialLink by remember(currentSocialLink) { mutableStateOf(currentSocialLink) }
     var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -298,6 +300,66 @@ fun EditContactDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                extraPhones.forEachIndexed { index, extraNum ->
+                    OutlinedTextField(
+                        value = extraNum,
+                        onValueChange = { newText ->
+                            val updated = extraPhones.toMutableList()
+                            updated[index] = newText
+                            extraPhones = updated
+                        },
+                        label = { Text(stringResource(R.string.contacts_extra_phone_label, index + 1), color = colors.textMuted) },
+                        leadingIcon = {
+                            Icon(imageVector = Icons.Rounded.Phone, contentDescription = null, tint = colors.textMuted)
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                val updated = extraPhones.toMutableList()
+                                updated.removeAt(index)
+                                extraPhones = updated
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = stringResource(R.string.contacts_remove_number),
+                                    tint = colors.actionRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        singleLine = true,
+                        shape = FieldShape,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = colors.primaryBrand,
+                            unfocusedBorderColor = colors.divider,
+                            focusedContainerColor = colors.cardElevated,
+                            unfocusedContainerColor = colors.cardElevated,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                TextButton(
+                    onClick = { extraPhones = extraPhones + "" },
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null,
+                        tint = colors.primaryBrand,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.contacts_add_another_number),
+                        color = colors.primaryBrand,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
@@ -344,9 +406,11 @@ fun EditContactDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank() && phone.isNotBlank()) {
+                        val validExtraPhones = extraPhones.map { it.trim() }.filter { it.isNotBlank() }
                         onSave(
                             name.trim(),
                             phone.trim(),
+                            validExtraPhones,
                             email.trim().ifBlank { null },
                             selectedPhotoUri,
                             socialLink.trim(),

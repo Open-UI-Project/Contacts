@@ -76,10 +76,90 @@ object ContactManager {
         return simList
     }
 
+    private fun saveToPhysicalSim(
+        context: Context,
+        name: String,
+        phone: String,
+        storageTarget: String
+    ): Boolean {
+        val simAccounts = getAvailableSimAccounts(context)
+        val targetSim = if (storageTarget == "SIM 2") {
+            simAccounts.find { it.slotIndex == 1 }
+        } else if (storageTarget == "SIM 1") {
+            simAccounts.find { it.slotIndex == 0 }
+        } else {
+            simAccounts.firstOrNull()
+        }
+
+        val targetSubId = targetSim?.simId
+
+        val simValues = android.content.ContentValues().apply {
+            put("tag", name)
+            put("number", phone)
+        }
+
+        val targetUris = mutableListOf<Uri>()
+        if (targetSubId != null && targetSubId >= 0) {
+            targetUris.add(Uri.parse("content://icc/adn/subId/$targetSubId"))
+        }
+        if (storageTarget == "SIM 2") {
+            targetUris.add(Uri.parse("content://icc/adn/subId/2"))
+        } else if (storageTarget == "SIM 1") {
+            targetUris.add(Uri.parse("content://icc/adn/subId/1"))
+        }
+        targetUris.add(Uri.parse("content://icc/adn"))
+        targetUris.add(Uri.parse("content://sim/adn"))
+
+        for (uri in targetUris) {
+            try {
+                val inserted = context.contentResolver.insert(uri, simValues)
+                if (inserted != null) {
+                    return true
+                }
+            } catch (_: Exception) {}
+        }
+        return false
+    }
+
+    private fun updateToPhysicalSim(
+        context: Context,
+        oldName: String,
+        oldPhone: String,
+        newName: String,
+        newPhone: String
+    ): Boolean {
+        val simValues = android.content.ContentValues().apply {
+            put("tag", oldName)
+            put("number", oldPhone)
+            put("newTag", newName)
+            put("newNumber", newPhone)
+        }
+
+        val simUris = listOf(
+            Uri.parse("content://icc/adn"),
+            Uri.parse("content://sim/adn"),
+            Uri.parse("content://icc/adn/subId/1"),
+            Uri.parse("content://icc/adn/subId/2")
+        )
+
+        val cleanOldName = oldName.replace("'", "''")
+        val cleanOldPhone = oldPhone.replace("[^0-9+]".toRegex(), "").replace("'", "''")
+        val where = "tag='$cleanOldName' AND number='$cleanOldPhone'"
+
+        for (uri in simUris) {
+            try {
+                val updated = context.contentResolver.update(uri, simValues, where, null)
+                if (updated > 0) return true
+            } catch (_: Exception) {}
+        }
+        return false
+    }
+
     suspend fun saveContact(
         context: Context,
         name: String,
         phone: String,
+        additionalPhones: List<String> = emptyList(),
         email: String? = null,
         photoUri: Uri? = null,
         storageTarget: String = "DEVICE"
@@ -88,6 +168,10 @@ object ContactManager {
             return@withContext false
         }
         return@withContext try {
+            if (storageTarget.startsWith("SIM")) {
+                saveToPhysicalSim(context, name, phone, storageTarget)
+            }
+
             val ops = ArrayList<ContentProviderOperation>()
 
             var accountType: String? = null
@@ -95,7 +179,13 @@ object ContactManager {
 
             if (storageTarget.startsWith("SIM")) {
                 accountType = "com.android.sim"
-                accountName = storageTarget
+                val simAccounts = getAvailableSimAccounts(context)
+                val targetSim = if (storageTarget == "SIM 2") {
+                    simAccounts.find { it.slotIndex == 1 }
+                } else {
+                    simAccounts.find { it.slotIndex == 0 }
+                }
+                accountName = targetSim?.accountName ?: storageTarget
             }
 
             val rawContactInsertIndex = ops.size
@@ -114,14 +204,17 @@ object ContactManager {
                     .build()
             )
 
-            ops.add(
-                ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
-                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
-                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
-                    .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
-                    .build()
-            )
+            val allPhones = (listOf(phone) + additionalPhones).filter { it.isNotBlank() }
+            allPhones.forEachIndexed { idx, pNum ->
+                ops.add(
+                    ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                        .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactInsertIndex)
+                        .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+                        .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, pNum)
+                        .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, if (idx == 0) ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE else ContactsContract.CommonDataKinds.Phone.TYPE_OTHER)
+                        .build()
+                )
+            }
 
             if (!email.isNullOrBlank()) {
                 ops.add(
@@ -169,6 +262,7 @@ object ContactManager {
         contactId: Long,
         name: String,
         phone: String,
+        additionalPhones: List<String> = emptyList(),
         email: String? = null,
         photoUri: Uri? = null
     ): Boolean = withContext(Dispatchers.IO) {
@@ -176,6 +270,12 @@ object ContactManager {
             return@withContext false
         }
         return@withContext try {
+            val contactUri = android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId)
+            val oldContact = fetchContactByUri(context, contactUri)
+            if (oldContact != null && oldContact.accountType.contains("sim", ignoreCase = true)) {
+                updateToPhysicalSim(context, oldContact.name, oldContact.number, name, phone)
+            }
+
             val ops = ArrayList<ContentProviderOperation>()
 
             ops.add(
@@ -189,14 +289,28 @@ object ContactManager {
             )
 
             ops.add(
-                ContentProviderOperation.newUpdate(ContactsContract.Data.CONTENT_URI)
+                ContentProviderOperation.newDelete(ContactsContract.Data.CONTENT_URI)
                     .withSelection(
                         "${ContactsContract.Data.CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
                         arrayOf(contactId.toString(), ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
                     )
-                    .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
                     .build()
             )
+
+            val rawContactId = getRawContactId(context, contactId)
+            val allPhones = (listOf(phone) + additionalPhones).filter { it.isNotBlank() }
+            if (rawContactId != null) {
+                allPhones.forEachIndexed { idx, pNum ->
+                    ops.add(
+                        ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                            .withValue(ContactsContract.Data.RAW_CONTACT_ID, rawContactId)
+                            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+                            .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, pNum)
+                            .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, if (idx == 0) ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE else ContactsContract.CommonDataKinds.Phone.TYPE_OTHER)
+                            .build()
+                    )
+                }
+            }
 
             if (!email.isNullOrBlank()) {
                 val emailUri = ContactsContract.Data.CONTENT_URI
@@ -221,7 +335,6 @@ object ContactManager {
                             .build()
                     )
                 } else {
-                    val rawContactId = getRawContactId(context, contactId)
                     if (rawContactId != null) {
                         ops.add(
                             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
@@ -245,7 +358,6 @@ object ContactManager {
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
                         val photoBytes = stream.toByteArray()
 
-                        val rawContactId = getRawContactId(context, contactId)
                         if (rawContactId != null) {
                             ops.add(
                                 ContentProviderOperation.newDelete(ContactsContract.Data.CONTENT_URI)
@@ -290,6 +402,84 @@ object ContactManager {
         }
     }
 
+    private class ContactBuilder(
+        val id: Long,
+        val name: String,
+        val primaryNumber: String,
+        val photoUri: String?,
+        val phoneType: String,
+        val accountType: String,
+        val lookupKey: String?,
+        val additionalNumbers: MutableList<String> = mutableListOf()
+    )
+
+    fun fetchDirectSimContacts(context: Context): List<ContactItem> {
+        val simContacts = mutableListOf<ContactItem>()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return simContacts
+        }
+
+        val simAccounts = getAvailableSimAccounts(context)
+        val urisToQuery = mutableListOf<Pair<Uri, String>>()
+
+        for (sim in simAccounts) {
+            urisToQuery.add(Pair(Uri.parse("content://icc/adn/subId/${sim.simId}"), sim.displayName))
+        }
+        if (urisToQuery.isEmpty()) {
+            urisToQuery.add(Pair(Uri.parse("content://icc/adn"), "SIM 1"))
+            urisToQuery.add(Pair(Uri.parse("content://icc/adn/subId/1"), "SIM 1"))
+            urisToQuery.add(Pair(Uri.parse("content://icc/adn/subId/2"), "SIM 2"))
+            urisToQuery.add(Pair(Uri.parse("content://sim/adn"), "SIM"))
+        }
+
+        val seenInSim = mutableSetOf<String>()
+
+        for ((uri, label) in urisToQuery) {
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex("name")
+                    val tagIdx = cursor.getColumnIndex("tag")
+                    val numberIdx = cursor.getColumnIndex("number")
+                    val idIdx = cursor.getColumnIndex("_id")
+
+                    var rowIndex = 0
+                    while (cursor.moveToNext()) {
+                        rowIndex++
+                        val number = if (numberIdx >= 0) cursor.getString(numberIdx) ?: "" else ""
+                        if (number.isBlank()) continue
+
+                        val clean = number.replace("[^0-9+]".toRegex(), "")
+                        if (clean.isBlank() || !seenInSim.add(clean)) continue
+
+                        val name = when {
+                            tagIdx >= 0 -> cursor.getString(tagIdx)
+                            nameIdx >= 0 -> cursor.getString(nameIdx)
+                            else -> null
+                        } ?: number
+
+                        val rowId = if (idIdx >= 0) cursor.getLong(idIdx) else rowIndex.toLong()
+                        val pseudoId = -200000L - (rowIndex * 100L + kotlin.math.abs(rowId % 99))
+
+                        simContacts.add(
+                            ContactItem(
+                                id = pseudoId,
+                                name = name.ifBlank { number },
+                                number = number,
+                                email = null,
+                                photoUri = null,
+                                phoneType = "SIM",
+                                accountType = "SIM ($label)",
+                                lookupKey = null
+                            )
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return simContacts
+    }
+
     fun fetchContacts(context: Context): List<ContactItem> {
         val list = mutableListOf<ContactItem>()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
@@ -302,8 +492,12 @@ object ContactManager {
             ContactsContract.CommonDataKinds.Phone.NUMBER,
             ContactsContract.CommonDataKinds.Phone.PHOTO_URI,
             ContactsContract.CommonDataKinds.Phone.TYPE,
-            ContactsContract.CommonDataKinds.Phone.ACCOUNT_TYPE_AND_DATA_SET
+            ContactsContract.CommonDataKinds.Phone.ACCOUNT_TYPE_AND_DATA_SET,
+            ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY
         )
+
+        val seenNumbers = mutableSetOf<String>()
+        val contactsMap = linkedMapOf<Long, ContactBuilder>()
 
         try {
             contentResolver.query(
@@ -319,8 +513,7 @@ object ContactManager {
                 val photoIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.PHOTO_URI)
                 val typeIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.TYPE)
                 val accountTypeIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.ACCOUNT_TYPE_AND_DATA_SET)
-
-                val seenNumbers = mutableSetOf<String>()
+                val lookupIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY)
 
                 while (cursor.moveToNext()) {
                     val id = if (idIndex >= 0) cursor.getLong(idIndex) else 0L
@@ -329,21 +522,28 @@ object ContactManager {
                     val photoUri = if (photoIndex >= 0) cursor.getString(photoIndex) else null
                     val type = if (typeIndex >= 0) cursor.getInt(typeIndex).toString() else ""
                     val accountType = if (accountTypeIndex >= 0) cursor.getString(accountTypeIndex) ?: "" else ""
+                    val lookupKey = if (lookupIndex >= 0) cursor.getString(lookupIndex) else null
 
                     val cleanNum = rawNumber.replace("[^0-9+]".toRegex(), "")
-                    if (cleanNum.isNotBlank() && seenNumbers.add(cleanNum)) {
-                        val email = fetchEmailForContact(context, id)
-                        list.add(
-                            ContactItem(
-                                id = id,
-                                name = name.ifBlank { rawNumber },
-                                number = rawNumber,
-                                email = email,
-                                photoUri = photoUri,
-                                phoneType = type,
-                                accountType = accountType
-                            )
+                    if (cleanNum.isNotBlank()) {
+                        seenNumbers.add(cleanNum)
+                    }
+
+                    val existing = contactsMap[id]
+                    if (existing == null) {
+                        contactsMap[id] = ContactBuilder(
+                            id = id,
+                            name = name.ifBlank { rawNumber },
+                            primaryNumber = rawNumber,
+                            photoUri = photoUri,
+                            phoneType = type,
+                            accountType = accountType,
+                            lookupKey = lookupKey
                         )
+                    } else {
+                        if (rawNumber.isNotBlank() && rawNumber != existing.primaryNumber && !existing.additionalNumbers.contains(rawNumber)) {
+                            existing.additionalNumbers.add(rawNumber)
+                        }
                     }
                 }
             }
@@ -351,7 +551,102 @@ object ContactManager {
             e.printStackTrace()
         }
 
-        return list
+        for (builder in contactsMap.values) {
+            val email = fetchEmailForContact(context, builder.id)
+            list.add(
+                ContactItem(
+                    id = builder.id,
+                    name = builder.name,
+                    number = builder.primaryNumber,
+                    additionalNumbers = builder.additionalNumbers.toList(),
+                    email = email,
+                    photoUri = builder.photoUri,
+                    phoneType = builder.phoneType,
+                    accountType = builder.accountType,
+                    lookupKey = builder.lookupKey
+                )
+            )
+        }
+
+        val directSimContacts = fetchDirectSimContacts(context)
+        for (simContact in directSimContacts) {
+            val clean = simContact.number.replace("[^0-9+]".toRegex(), "")
+            if (clean.isNotBlank() && seenNumbers.add(clean)) {
+                list.add(simContact)
+            }
+        }
+
+        return list.sortedBy { it.name.lowercase() }
+    }
+
+    fun getContactLookupUri(contactId: Long, lookupKey: String?): Uri {
+        return if (!lookupKey.isNullOrBlank()) {
+            ContactsContract.Contacts.getLookupUri(contactId, lookupKey)
+                ?: android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId)
+        } else {
+            android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId)
+        }
+    }
+
+    fun fetchContactByUri(context: Context, contactUri: Uri): ContactItem? {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return null
+        }
+        return try {
+            val projection = arrayOf(
+                ContactsContract.Contacts._ID,
+                ContactsContract.Contacts.DISPLAY_NAME,
+                ContactsContract.Contacts.PHOTO_URI,
+                ContactsContract.Contacts.LOOKUP_KEY
+            )
+            var contactId: Long? = null
+            var displayName: String? = null
+            var photoUri: String? = null
+            var lookupKey: String? = null
+
+            context.contentResolver.query(contactUri, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idIdx = cursor.getColumnIndex(ContactsContract.Contacts._ID)
+                    val nameIdx = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
+                    val photoIdx = cursor.getColumnIndex(ContactsContract.Contacts.PHOTO_URI)
+                    val lookupIdx = cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY)
+
+                    if (idIdx >= 0) contactId = cursor.getLong(idIdx)
+                    if (nameIdx >= 0) displayName = cursor.getString(nameIdx)
+                    if (photoIdx >= 0) photoUri = cursor.getString(photoIdx)
+                    if (lookupIdx >= 0) lookupKey = cursor.getString(lookupIdx)
+                }
+            }
+
+            val finalId = contactId ?: return null
+            var phoneNumber = ""
+            var phoneType = ""
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER, ContactsContract.CommonDataKinds.Phone.TYPE),
+                "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                arrayOf(finalId.toString()),
+                null
+            )?.use { phoneCursor ->
+                if (phoneCursor.moveToFirst()) {
+                    phoneNumber = phoneCursor.getString(0) ?: ""
+                    phoneType = phoneCursor.getInt(1).toString()
+                }
+            }
+
+            val email = fetchEmailForContact(context, finalId)
+            ContactItem(
+                id = finalId,
+                name = displayName ?: phoneNumber,
+                number = phoneNumber,
+                email = email,
+                photoUri = photoUri,
+                phoneType = phoneType,
+                lookupKey = lookupKey
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun fetchEmailForContact(context: Context, contactId: Long): String? {

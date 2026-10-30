@@ -85,7 +85,7 @@
     <!-- About Dialog -->
     <string name="about_app_name">Contacts</string>
     <string name="about_subtitle">An Open UI Project App</string>
-    <string name="about_version_tag">v1.0.0 • Open Source</string>
+    <string name="about_version_tag">v2.0.0 • Open Source</string>
     <string name="about_goal">Our goal is to create a free, modern, open-source contacts application inspired by the elegance of One UI, without proprietary limitations.</string>
     <string name="about_privacy">The app is open-source, completely free of telemetry and data tracking, and developed transparently with the community. Join development!</string>
     <string name="about_tagline">Contacts — freedom, openness, and convenience in one app. 💙</string>
@@ -93,4 +93,25 @@
     <string name="about_feature_notracking">No Tracking</string>
     <string name="about_feature_community">Community</string>
     <string name="about_btn_github">Project GitHub</string>
+    <string name="contacts_pick_contact">Select Contact</string>
+    <string name="contacts_pick_phone">Select Phone Number</string>
+    <string name="contacts_settings">Настройки</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_appearance_header">Оформление и тема</string>
+    <string name="settings_theme_open_ui">OpenUI Project Style</string>
+    <string name="settings_theme_open_ui_desc">Фирменный стиль One UI с плавающим островком и тёмным оформлением</string>
+    <string name="settings_theme_m3">Material 3 Expressive</string>
+    <string name="settings_theme_m3_desc">Чистый легковесный стиль Google с динамической палитрой и выразительными формами</string>
+    <string name="settings_display_header">Экран и плавность</string>
+    <string name="settings_refresh_rate_title">Частота обновления дисплея</string>
+    <string name="settings_refresh_rate_summary">Активирован режим высокой частоты: %1$s Гц (120, 144, 165 Гц)</string>
+    <string name="settings_refresh_rate_badge">Максимальная плавность</string>
+    <string name="settings_storage_header">Хранилище контактов</string>
+    <string name="settings_default_storage_title">Место сохранения по умолчанию</string>
+    <string name="settings_system_header">Система</string>
+    <string name="settings_default_app_title">Приложение по умолчанию</string>
+    <string name="settings_default_app_desc">Назначить основным приложением для контактов и звонков</string>
+    <string name="contacts_add_another_number">+ Добавить еще номер</string>
+    <string name="contacts_extra_phone_label">Дополнительный номер %1$d</string>
+    <string name="contacts_remove_number">Удалить номер</string>
 </resources>

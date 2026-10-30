@@ -25,6 +25,8 @@ data class ContactItem(
     val photoUri: String? = null,
     val phoneType: String = "",
     val accountType: String = "",
+    val lookupKey: String? = null,
+    val additionalNumbers: List<String> = emptyList(),
     val initials: String = computeInitials(name)
 )
 

@@ -216,7 +216,26 @@ class ContactPreferences(context: Context) {
         }
     }
 
+    fun getThemeMode(): AppThemeMode {
+        val name = prefs.getString("app_theme_mode", AppThemeMode.OPEN_UI.name) ?: AppThemeMode.OPEN_UI.name
+        return try {
+            AppThemeMode.valueOf(name)
+        } catch (_: Exception) {
+            AppThemeMode.OPEN_UI
+        }
+    }
+
+    fun setThemeMode(mode: AppThemeMode) {
+        prefs.edit().putString("app_theme_mode", mode.name).apply()
+    }
+
     private fun cleanNumber(number: String): String {
         return number.replace("[^0-9+]".toRegex(), "")
     }
 }
+
+enum class AppThemeMode {
+    OPEN_UI,
+    MATERIAL_3_EXPRESSIVE
+}
+

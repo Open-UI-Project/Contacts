@@ -37,7 +37,9 @@ import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SimCard
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -271,6 +273,15 @@ fun ContactCallHistoryScreen(
                     fontSize = 14.sp
                 )
 
+                currentContact.additionalNumbers.forEach { extraNum ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = extraNum,
+                        color = colors.textMuted,
+                        fontSize = 13.sp
+                    )
+                }
+
                 if (!currentContact.email.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
@@ -296,6 +307,30 @@ fun ContactCallHistoryScreen(
                         color = colors.actionRed,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                val isSimContact = currentContact.accountType.contains("sim", ignoreCase = true) || currentContact.accountType.startsWith("SIM")
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isSimContact) colors.dialerGreen.copy(alpha = 0.12f) else colors.cardElevated)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSimContact) Icons.Rounded.SimCard else Icons.Rounded.PhoneAndroid,
+                        contentDescription = null,
+                        tint = if (isSimContact) colors.dialerGreen else colors.textMuted,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isSimContact) "SIM-карта" else stringResource(R.string.contacts_storage_phone_title),
+                        color = if (isSimContact) colors.dialerGreen else colors.textMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -541,7 +576,7 @@ fun ContactCallHistoryScreen(
                 currentSocialLink = socialMedia,
                 currentBackgroundUri = customBgUri,
                 onDismiss = { showEditDialog = false },
-                onSave = { name, number, email, photoUri, social, newBgUri ->
+                onSave = { name, number, extraPhones, email, photoUri, social, newBgUri ->
                     showEditDialog = false
                     coroutineScope.launch {
                         val success = ContactManager.updateContact(
@@ -549,6 +584,7 @@ fun ContactCallHistoryScreen(
                             contactId = currentContact.id,
                             name = name,
                             phone = number,
+                            additionalPhones = extraPhones,
                             email = email,
                             photoUri = photoUri
                         )
@@ -560,6 +596,7 @@ fun ContactCallHistoryScreen(
                             currentContact = currentContact.copy(
                                 name = name,
                                 number = number,
+                                additionalNumbers = extraPhones,
                                 email = email,
                                 photoUri = photoUri?.toString() ?: currentContact.photoUri
                             )
